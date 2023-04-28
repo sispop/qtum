@@ -78,6 +78,16 @@ uint256 CTransaction::ComputeWitnessHash() const
     return SerializeHash(*this, SER_GETHASH, 0);
 }
 
+bool CTransaction::IsMnTx() const
+{
+    return IsMasternodeTx(nVersion);
+}
+
+bool CMutableTransaction::IsMnTx() const
+{
+    return IsMasternodeTx(nVersion);
+}
+
 CTransaction::CTransaction() : vin(), vout(), nVersion(CTransaction::CURRENT_VERSION), nLockTime(0), hash{}, m_witness_hash{} {}
 CTransaction::CTransaction(const CMutableTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nLockTime(tx.nLockTime), hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash()} {}
 CTransaction::CTransaction(CMutableTransaction&& tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), nVersion(tx.nVersion), nLockTime(tx.nLockTime), hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash()} {}
@@ -189,4 +199,13 @@ bool CTransaction::HasOpSender() const
 bool CMutableTransaction::HasOpSender() const
 {
     return hasOpSender(*this);
+}
+
+bool IsMasternodeTx(const int &nVersion) {
+    return nVersion == QUAGBA_TX_VERSION_MN_COINBASE ||
+     nVersion == QUAGBA_TX_VERSION_MN_QUORUM_COMMITMENT ||
+     nVersion == QUAGBA_TX_VERSION_MN_REGISTER ||
+     nVersion == QUAGBA_TX_VERSION_MN_UPDATE_SERVICE || 
+     nVersion == QUAGBA_TX_VERSION_MN_UPDATE_REGISTRAR ||
+     nVersion == QUAGBA_TX_VERSION_MN_UPDATE_REVOKE;
 }

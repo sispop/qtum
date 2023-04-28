@@ -22,6 +22,9 @@
 #include <index/blockfilterindex.h>
 #include <logging.h>
 #include <logging/timer.h>
+#include <masternode/masternodepayments.h>
+#include <evo/specialtx.h>
+#include <llmq/quorums_chainlocks.h>
 #include <node/blockstorage.h>
 #include <node/coinstats.h>
 #include <node/ui_interface.h>
@@ -1770,6 +1773,12 @@ void CChainState::InvalidChainFound(CBlockIndex* pindexNew)
 // which does its own setBlockIndexCandidates management.
 void CChainState::InvalidBlockFound(CBlockIndex* pindex, const BlockValidationState& state)
 {
+    if (state.GetResult() != BlockValidationResult::BLOCK_CHAINLOCK) {
+        // if its any other error other than chainlock and we have a conflict then move back to previous known good chainlock
+        if (llmq::chainLocksHandler->HasChainLock(pindex->nHeight, pindex->GetBlockHash())) {
+            llmq::chainLocksHandler->SetToPreviousChainLock(); 
+        }
+    }
     AssertLockHeld(cs_main);
     if (state.GetResult() != BlockValidationResult::BLOCK_MUTATED) {
         pindex->nStatus |= BLOCK_FAILED_VALID;
@@ -3159,7 +3168,14 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
     int nInputs = 0;
     int64_t nSigOpsCost = 0;
     blockundo.vtxundo.reserve(block.vtx.size() - 1);
-
+    const bool ibd = IsInitialBlockDownload();
+    const uint256& blockHash = block.GetHash();
+    // MUST process special txes before updating UTXO to ensure consistency between mempool and block processing
+    if (!ProcessSpecialTxsInBlock(m_blockman, block, pindex, state, view, fJustCheck, fScriptChecks)) {
+        LogPrintf("ERROR: ConnectBlock(): ProcessSpecialTxsInBlock for block %s failed with %s\n",
+                     pindex->GetBlockHash().ToString(), state.ToString());
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-process-mn");
+    }
     ///////////////////////////////////////////////////////// // qtum
     std::vector<std::pair<CAddressIndexKey, CAmount> > addressIndex;
     std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> > addressUnspentIndex;
@@ -3485,6 +3501,16 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
         LogPrintf("ERROR: %s: CheckQueue failed\n", __func__);
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "block-validation-failed");
     }
+    // MODIFIED TO CHECK MASTERNODE PAYMENTS AND SUPERBLOCKS
+    const CAmount &blockReward = GetBlockSubsidy(pindex->nHeight, params.GetConsensus());
+    CAmount nMNSeniorityRet = 0;
+    CAmount nMNFloorDiffRet = 0;
+    // detect MN was paid properly, accounting for seniority which is added to subsidy
+    if (!IsBlockPayeeValid(m_chain, *block.vtx[0], pindex->nHeight, blockReward, nFees, nMNSeniorityRet, nMNFloorDiffRet)) {
+        LogPrintf("ERROR: ConnectBlock(): couldn't find masternode or superblock payments\n");
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-payee");
+    }
+
     int64_t nTime4 = GetTimeMicros(); nTimeVerify += nTime4 - nTime2;
     LogPrint(BCLog::BENCH, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1, MILLI * (nTime4 - nTime2), nInputs <= 1 ? 0 : MILLI * (nTime4 - nTime2) / (nInputs-1), nTimeVerify * MICRO, nTimeVerify * MILLI / nBlocksTotal);
 
@@ -4596,6 +4622,7 @@ bool CChainState::InvalidateBlock(BlockValidationState& state, CBlockIndex* pind
 
     // Only notify about a new block tip if the active chain was modified.
     if (pindex_was_in_chain) {
+//        GetMainSignals().SynchronousUpdatedBlockTip(to_mark_failed->pprev, nullptr);
         uiInterface.NotifyBlockTip(GetSynchronizationState(IsInitialBlockDownload()), to_mark_failed->pprev);
     }
     return true;
@@ -4603,7 +4630,16 @@ bool CChainState::InvalidateBlock(BlockValidationState& state, CBlockIndex* pind
 
 void CChainState::ResetBlockFailureFlags(CBlockIndex *pindex) {
     AssertLockHeld(cs_main);
-
+//quagba
+    if ( !pindex) {
+        if (llmq::AreChainLocksEnabled() && m_chainman.m_best_invalid && m_chainman.m_best_invalid->GetAncestor(m_chain.Height()) == m_chain.Tip()) {
+            LogPrintf("%s: the best known invalid block (%s) is ahead of our tip, reconsidering\n",
+                    __func__, m_chainman.m_best_invalid->GetBlockHash().ToString());
+            pindex = m_chainman.m_best_invalid;
+        } else {
+            return;
+        }
+    }
     int nHeight = pindex->nHeight;
 
     // Remove the invalidity flag from this block and all its descendants.
@@ -5125,6 +5161,16 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
         }
     }
 
+    bool fDIP0003Active_context = nHeight >= consensusParams.DIP0003Height;
+    if(fDIP0003Active_context && block.vtx[0]->nVersion != QUAGBA_TX_VERSION_MN_COINBASE && block.vtx[0]->nVersion != QUAGBA_TX_VERSION_MN_QUORUM_COMMITMENT) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-cb-type", strprintf("%s : Incorrect version of coinbase transaction", __func__));
+    }
+    for (const auto& txRef : block.vtx)
+    {
+        if (!txRef->IsCoinBase() && (txRef->nVersion == QUAGBA_TX_VERSION_MN_COINBASE || txRef->nVersion == QUAGBA_TX_VERSION_MN_QUORUM_COMMITMENT)) {
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-mn-version", "Bad version for non-coinbase masternode transaction");
+        }
+    }
     return true;
 }
 
@@ -5291,6 +5337,24 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
             }
         }
 
+        // Quagba
+        if (llmq::chainLocksHandler->HasConflictingChainLock(pindexPrev->nHeight + 1, hash)) {
+            // if processing block or if min_pow_checked is true (otherwise we want to reject block as semantically invalid so lock is removed)
+            // for block it will check in ConnectBlock() for a conflicting chainlock and return state back to ActivateBestChainStep which will call InvalidBlockFound
+            // there if the block is semantically invalid (anything other than BLOCK_CHAINLOCK) we will remove the lock if it exists on the block
+            // the nuance here is that we want to check the header here but we want to check for the rest of the block consensus including transactions to know if its semantically valid
+            // before deciding to enforce a chainlock in a conflict
+            nStatus = BLOCK_CONFLICT_CHAINLOCK;
+            if(min_pow_checked && !bForBlock) {
+                if(pindex == nullptr)
+                    pindex = m_blockman.AddToBlockIndex(block, m_best_header, nStatus);
+
+                if (ppindex)
+                    *ppindex = pindex;
+                return state.Invalid(BlockValidationResult::BLOCK_CHAINLOCK, "bad-chainlock");
+            }
+        }
+    }
         // Reject proof of work at height consensusParams.nLastPOWBlock
         int nHeight = pindexPrev->nHeight + 1;
         if (block.IsProofOfWork() && nHeight > chainparams.GetConsensus().nLastPOWBlock)
@@ -5605,6 +5669,10 @@ bool TestBlockValidity(BlockValidationState& state,
     assert(pindexPrev && pindexPrev == chainstate.m_chain.Tip());
     CCoinsViewCache viewNew(&chainstate.CoinsTip());
     uint256 block_hash(block.GetHash());
+    uint256 block_hash(block.GetHash());
+    if (llmq::chainLocksHandler->HasConflictingChainLock(pindexPrev->nHeight + 1, block_hash)) {
+        return state.Invalid(BlockValidationResult::BLOCK_CHAINLOCK, "bad-chainlock");
+    }
     CBlockIndex indexDummy(block);
     indexDummy.pprev = pindexPrev;
     indexDummy.nHeight = pindexPrev->nHeight + 1;

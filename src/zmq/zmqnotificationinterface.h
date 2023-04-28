@@ -31,6 +31,8 @@ protected:
     void BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexConnected) override;
     void BlockDisconnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexDisconnected) override;
     void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) override;
+    void NotifyGovernanceVote(const uint256& vote) override;
+    void NotifyGovernanceObject(const uint256& object) override;
 
 private:
     CZMQNotificationInterface();

@@ -31,6 +31,15 @@
 #include <wallet/stake.h>
 #endif
 
+#include <masternode/masternodepayments.h>
+#include <masternode/masternodesync.h>
+#include <evo/specialtx.h>
+#include <evo/cbtx.h>
+#include <evo/simplifiedmns.h>
+#include <evo/deterministicmns.h>
+#include <llmq/quorums_blockprocessor.h>
+#include <llmq/quorums_commitment.h>
+#include <validationinterface.h>
 #include <algorithm>
 #include <utility>
 
@@ -200,7 +209,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     CBlockIndex* pindexPrev = m_chainstate.m_chain.Tip();
     assert(pindexPrev != nullptr);
     nHeight = pindexPrev->nHeight + 1;
-
+    bool fDIP0003Active_context = nHeight >= chainparams.GetConsensus().DIP0003Height;
     pblock->nVersion = g_versionbitscache.ComputeBlockVersion(pindexPrev, chainparams.GetConsensus());
     // -regtest only: allow overriding block.nVersion with
     // -blockversion=N to test forking scenarios
@@ -305,6 +314,42 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     //then it won't get populated
     RebuildRefundTransaction(pblock);
     ////////////////////////////////////////////////////////
+
+    if(fDIP0003Active_context) {
+        // Update coinbase transaction with additional info about masternode and governance payments,
+        // get some info back to pass to getblocktemplate
+        coinbaseTx.nVersion = QUAGBA_TX_VERSION_MN_COINBASE;
+        CCbTx cbTx;
+        cbTx.nVersion = 2;
+        cbTx.nHeight = nHeight;
+        llmq::CFinalCommitmentTxPayload qc;
+        // create commitment payload if quorum commitment is needed
+        llmq::CFinalCommitment commitment;
+        if (llmq::quorumBlockProcessor->GetMinableCommitment(chainparams.GetConsensus().llmqTypeChainLocks, nHeight, commitment)) {
+            coinbaseTx.nVersion = QUAGBA_TX_VERSION_MN_QUORUM_COMMITMENT;
+            qc.commitments.push_back(commitment);
+        }
+        if (coinbaseTx.nVersion == QUAGBA_TX_VERSION_MN_QUORUM_COMMITMENT) {
+            qc.cbTx = cbTx;
+        }
+        // pass qc pointer here because we want to build merkleRootMNList / merkleRootQuorums which depends on qc if qc is valid
+        if (!CalcCbTxMerkleRootMNList(*pblock, pindexPrev, cbTx.merkleRootMNList, state, m_chainstate.CoinsTip(), &qc)) {
+            throw std::runtime_error(strprintf("%s: CalcCbTxMerkleRootMNList failed: %s", __func__, state.ToString()));
+        }
+        if (!CalcCbTxMerkleRootQuorums(*pblock, pindexPrev, *llmq::quorumBlockProcessor, cbTx.merkleRootQuorums, state, &qc)) {
+            throw std::runtime_error(strprintf("%s: CalcCbTxMerkleRootQuorums failed: %s", __func__, state.ToString()));
+        }
+
+        if(coinbaseTx.nVersion == QUAGBA_TX_VERSION_MN_COINBASE) {
+            ds << cbTx;
+        } else {
+            qc.cbTx = cbTx;
+            ds << qc;
+        }
+        // Update coinbase transaction with additional info about masternode and governance payments,
+        // get some info back to pass to getblocktemplate
+        FillBlockPayments(m_chainstate.m_chain, coinbaseTx, nHeight, blockReward, nFees, pblocktemplate->voutMasternodePayments, pblocktemplate->voutSuperblockPayments);
+    }
 
     pblocktemplate->vchCoinbaseCommitment = GenerateCoinbaseCommitment(*pblock, pindexPrev, chainparams.GetConsensus(), fProofOfStake);
     pblocktemplate->vTxFees[0] = -nFees;

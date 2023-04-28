@@ -40,6 +40,7 @@ public:
     bool NotifyTransaction(const CTransaction &transaction) override;
 };
 
+
 class CZMQPublishRawBlockNotifier : public CZMQAbstractPublishNotifier
 {
 public:
@@ -59,6 +60,18 @@ public:
     bool NotifyBlockDisconnect(const CBlockIndex *pindex) override;
     bool NotifyTransactionAcceptance(const CTransaction &transaction, uint64_t mempool_sequence) override;
     bool NotifyTransactionRemoval(const CTransaction &transaction, uint64_t mempool_sequence) override;
+};
+
+class CZMQPublishHashGovernanceVoteNotifier : public CZMQAbstractPublishNotifier
+{
+public:
+    bool NotifyGovernanceVote(const uint256 &vote) override;
+};
+
+class CZMQPublishHashGovernanceObjectNotifier : public CZMQAbstractPublishNotifier
+{
+public:
+    bool NotifyGovernanceObject(const uint256 &object) override;
 };
 
 #endif // BITCOIN_ZMQ_ZMQPUBLISHNOTIFIER_H

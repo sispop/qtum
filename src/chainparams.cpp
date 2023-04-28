@@ -65,6 +65,71 @@ static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits
     return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTime, nNonce, nBits, nVersion, genesisReward);
 }
 
+void CChainParams::UpdateLLMQTestParams(int size, int threshold) {
+    auto& params = consensus.llmqs.at(Consensus::LLMQ_TEST);
+    params.size = size;
+    params.minSize = threshold;
+    params.threshold = threshold;
+    params.dkgBadVotesThreshold = threshold;
+}
+// this one is for testing only
+static Consensus::LLMQParams llmq_test = {
+        .type = Consensus::LLMQ_TEST,
+        .name = "llmq_test",
+        .size = 3,
+        .minSize = 2,
+        .threshold = 2,
+
+        .dkgInterval = 24, // one DKG per hour
+        .dkgPhaseBlocks = 2,
+        .dkgMiningWindowStart = 10, // dkgPhaseBlocks * 5 = after finalization
+        .dkgMiningWindowEnd = 18,
+        .dkgBadVotesThreshold = 2,
+
+        .signingActiveQuorumCount = 4, // just a few ones to allow easier testing
+
+        .keepOldConnections = 5,
+        .recoveryMembers = 3,
+};
+
+static Consensus::LLMQParams llmq50_60 = {
+        .type = Consensus::LLMQ_50_60,
+        .name = "llmq_50_60",
+        .size = 50,
+        .minSize = 40,
+        .threshold = 30,
+
+        .dkgInterval = 60, // one DKG per hour
+        .dkgPhaseBlocks = 5,
+        .dkgMiningWindowStart = 25, // dkgPhaseBlocks * 5 = after finalization
+        .dkgMiningWindowEnd = 45,
+        .dkgBadVotesThreshold = 40,
+
+        .signingActiveQuorumCount = 24, // a full day worth of LLMQs
+
+        .keepOldConnections = 25,
+        .recoveryMembers = 25,
+};
+
+static Consensus::LLMQParams llmq400_60 = {
+        .type = Consensus::LLMQ_400_60,
+        .name = "llmq_400_60",
+        .size = 400,
+        .minSize = 300,
+        .threshold = 240,
+
+        .dkgInterval = 24 * 12, // one DKG every 12 hours
+        .dkgPhaseBlocks = 4,
+        .dkgMiningWindowStart = 20, // dkgPhaseBlocks * 5 = after finalization
+        .dkgMiningWindowEnd = 28,
+        .dkgBadVotesThreshold = 300,
+
+        .signingActiveQuorumCount = 4, // two days worth of LLMQs
+
+        .keepOldConnections = 5,
+        .recoveryMembers = 100,
+};
+
 /**
  * Main network on which people trade goods and services.
  */
@@ -72,6 +137,13 @@ class CMainParams : public CChainParams {
 public:
     CMainParams() {
         strNetworkID = CBaseChainParams::MAIN;
+        consensus.nSuperblockStartBlock = 1;
+        consensus.nSuperblockCycle = 17520;
+        consensus.nGovernanceMinQuorum = 10;
+        consensus.nGovernanceFilterElements = 20000;
+        consensus.nMasternodeMinimumConfirmations = 15;
+        consensus.DIP0003Height = 1004200;
+        consensus.DIP0003EnforcementHeight = 1004200;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 985500; // qtum halving every 4 years
@@ -166,6 +238,15 @@ public:
         m_is_test_chain = false;
         m_is_mockable_chain = false;
         fHasHardwareWalletSupport = true;
+        fRequireRoutableExternalIP = true;
+        vSporkAddresses = {"sys1qx0zzzjag402apkw4kn8unr0qa0k3pv3258v4sr"};
+        nMinSporkKeys = 1;
+        // long living quorum params
+        consensus.llmqs[Consensus::LLMQ_400_60] = llmq400_60;
+        consensus.llmqs[Consensus::LLMQ_50_60] = llmq50_60;
+        consensus.llmqTypeChainLocks = Consensus::LLMQ_400_60;
+        nLLMQConnectionRetryTimeout = 60;
+        nFulfilledRequestExpireTime = 60*60; // fulfilled requests expire in 1 hour
 
         checkpointData = {
             {
@@ -678,6 +759,29 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
 {
     MaybeUpdateHeights(args, consensus);
 
+    if (args.IsArgSet("-mncollateral")) {
+        uint32_t collateral = args.GetIntArg("-mncollateral", DEFAULT_MN_COLLATERAL_REQUIRED);
+        nMNCollateralRequired = collateral*COIN;
+    }
+    if (args.IsArgSet("-dip3params")) {
+        std::string strDIP3Params = args.GetArg("-dip3params", "");
+        std::vector<std::string> vDIP3Params = SplitString(strDIP3Params, ':');
+        if (vDIP3Params.size() != 2) {
+            throw std::runtime_error("DIP3 parameters malformed, expecting DIP3ActivationHeight:DIP3EnforcementHeight");
+        }
+        if (!ParseInt32(vDIP3Params[0], &options.dip3startblock)) {
+            throw std::runtime_error(strprintf("Invalid nDIP3ActivationHeight (%s)", vDIP3Params[0]));
+        }
+        if (!ParseInt32(vDIP3Params[1], &options.dip3enforcement)) {
+            throw std::runtime_error(strprintf("Invalid nDIP3EnforcementHeight (%s)", vDIP3Params[1]));
+        }
+    }
+    else if (args.IsArgSet("-dip19params")) {
+        std::string strDIP19Params = args.GetArg("-dip19params", "");
+        if (!ParseInt32(strDIP19Params, &options.v19startblock)) {
+            throw std::runtime_error(strprintf("Invalid nDIP19ActivationHeight (%s)", strDIP19Params));
+        }
+    }
     if (!args.IsArgSet("-vbparams")) return;
 
     for (const std::string& strDeployment : args.GetArgs("-vbparams")) {
@@ -978,4 +1082,10 @@ void CChainParams::UpdateTaprootHeight(int nHeight)
 void UpdateTaprootHeight(int nHeight)
 {
     const_cast<CChainParams*>(globalChainParams.get())->UpdateTaprootHeight(nHeight);
+}
+
+void UpdateLLMQTestParams(int size, int threshold)
+{
+    auto* params = const_cast<CChainParams*> (globalChainParams.get ());
+    params->UpdateLLMQTestParams(size, threshold);
 }

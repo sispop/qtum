@@ -17,6 +17,10 @@ static const int INIT_PROTO_VERSION = 209;
 //! disconnect from peers older than this proto version
 static const int MIN_PEER_PROTO_VERSION = 70016;
 
+// Quagba
+//! minimum proto version of masternode to accept in DKGs
+static const int MIN_MASTERNODE_PROTO_VERSION = 70017;
+
 //! disconnect from peers older than this proto version after QIP7
 static const int MIN_PEER_PROTO_VERSION_AFTER_QIP7 = 70017;
 

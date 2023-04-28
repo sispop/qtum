@@ -8,6 +8,11 @@
 #include <node/blockstorage.h>
 #include <validation.h>
 #include <chainparams.h>
+#include <evo/evodb.h>
+#include <evo/deterministicmns.h>
+#include <llmq/quorums_init.h>
+#include <governance/governance.h>
+
 
 namespace node {
 std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
@@ -38,6 +43,20 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
     UnloadBlockIndex(mempool, chainman);
 
     auto& pblocktree{chainman.m_blockman.m_block_tree_db};
+    LogPrintf("Creating LLMQ and asset databases...\n");
+    llmq::DestroyLLMQSystem();
+    evoDb.reset();
+    evoDb = std::make_unique<CEvoDB>(DBParams{
+        .path = chainman.m_options.datadir / "evodb",
+        .cache_bytes = static_cast<size_t>(cache_sizes.evo_db),
+        .memory_only = options.block_tree_db_in_memory,
+        .wipe_data = options.fReindexGeth,
+        .options = chainman.m_options.block_tree_db});
+    deterministicMNManager.reset();
+    deterministicMNManager.reset(new CDeterministicMNManager(*evoDb));
+    governance.reset();
+    governance.reset(new CGovernanceManager(chainman));
+    llmq::InitLLMQSystem(*evoDb, options.block_tree_db_in_memory, *options.connman, *options.banman, *options.peerman, chainman);
     // new CBlockTreeDB tries to delete the existing file, which
     // fails if it's still open from the previous loop. Close it first:
     pblocktree.reset();

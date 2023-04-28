@@ -27,6 +27,10 @@
 #include <util/system.h>
 
 #include <txmempool.h>
+#include <masternode/masternodesync.h>
+#include <spork.h>
+#include <bls/bls.h>
+#include <llmq/quorums_utils.h>
 #include <validation.h>
 
 #include <optional>
@@ -40,6 +44,169 @@
 
 using node::NodeContext;
 
+static RPCHelpMan mnsync()
+{
+        return RPCHelpMan{"mnsync",
+            {"\nReturns the sync status, updates to the next step or resets it entirely.\n"},
+            {
+                {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "The command to issue (status|next|reset)"},
+            },
+            RPCResult{RPCResult::Type::ANY, "result", "Result"},
+            RPCExamples{
+                HelpExampleCli("mnsync", "status")
+                + HelpExampleRpc("mnsync", "status")
+            },
+        [&](const RPCHelpMan& self, const node::JSONRPCRequest& request) -> UniValue
+{
+
+    NodeContext& node = EnsureAnyNodeContext(request.context);
+    std::string strMode = request.params[0].get_str();
+
+    if(strMode == "status") {
+        UniValue objStatus(UniValue::VOBJ);
+        objStatus.pushKV("AssetID", masternodeSync.GetAssetID());
+        objStatus.pushKV("AssetName", masternodeSync.GetAssetName());
+        objStatus.pushKV("AssetStartTime", masternodeSync.GetAssetStartTime());
+        objStatus.pushKV("Attempt", masternodeSync.GetAttempt());
+        objStatus.pushKV("IsBlockchainSynced", masternodeSync.IsBlockchainSynced());
+        objStatus.pushKV("IsSynced", masternodeSync.IsSynced());
+        return objStatus;
+    }
+
+    if(strMode == "next")
+    {
+        if (!node.connman)
+            throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
+
+        masternodeSync.SwitchToNextAsset(*node.connman);
+        return "sync updated to " + masternodeSync.GetAssetName();
+    }
+
+    if(strMode == "reset")
+    {
+        masternodeSync.Reset(true);
+        return "success";
+    }
+    return "failure";
+},
+    };
+}
+
+/*
+    Used for updating/reading spork settings on the network
+*/
+static RPCHelpMan spork()
+{
+    return RPCHelpMan{"spork",
+            {"\nShows or updates the value of the specific spork. Requires \"-sporkkey\" to be set to sign the message for updating.\n"},
+            {
+                {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "\"show\" to show all current spork values, \"active\" to show which sporks are active or the name of the spork to update"},
+                {"value", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The new desired value of the spork if updating"},
+            },
+            {
+                RPCResult{"for command = \"show\"",
+                    RPCResult::Type::ANY, "SPORK_NAME", "The value of the specific spork with the name SPORK_NAME"},
+                RPCResult{"for command = \"active\"",
+                    RPCResult::Type::ANY, "SPORK_NAME", "'true' for time-based sporks if spork is active and 'false' otherwise"},
+                RPCResult{"for updating",
+                    RPCResult::Type::ANY, "result", "\"success\" if spork value was updated or this help otherwise"},
+            },
+            RPCExamples{
+                HelpExampleCli("spork", "SPORK_9_NEW_SIGS 4070908800") 
+                + HelpExampleCli("spork", "show")
+                + HelpExampleRpc("spork", "\"SPORK_9_NEW_SIGS\", 4070908800")
+                + HelpExampleRpc("spork", "\"show\"")
+            },
+        [&](const RPCHelpMan& self, const node::JSONRPCRequest& request) -> UniValue
+{
+    std::string strCommand = request.params[0].get_str();
+    if(strCommand != "show" && strCommand != "active") {
+        NodeContext& node = EnsureAnyNodeContext(request.context);
+        // advanced mode, update spork values
+        int nSporkID = CSporkManager::GetSporkIDByName(request.params[0].get_str());
+        if(nSporkID == SPORK_INVALID)
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid spork name");
+
+        if (!node.connman)
+            throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
+
+        // SPORK VALUE
+        int64_t nValue = request.params[1].getInt<int64_t>();;
+
+        //broadcast new spork
+        if(sporkManager.UpdateSpork(nSporkID, nValue, *node.peerman)){
+            return "success";
+        }
+    } else {
+        // basic mode, show info
+        if (strCommand == "show") {
+            UniValue ret(UniValue::VOBJ);
+            for (const auto& sporkDef : sporkDefs) {
+                ret.pushKV(std::string(sporkDef.name), sporkManager.GetSporkValue(sporkDef.sporkId));
+            }
+            return ret;
+        } else if(strCommand == "active"){
+            UniValue ret(UniValue::VOBJ);
+            for (const auto& sporkDef : sporkDefs) {
+                ret.pushKV(std::string(sporkDef.name), sporkManager.IsSporkActive(sporkDef.sporkId));
+            }
+            return ret;
+        }
+    }
+    return "failure";
+},
+    };
+}
+
+
+
+static RPCHelpMan mnauth()
+{
+    return RPCHelpMan{"mnauth",
+            {"\nOverride MNAUTH processing results for the specified node with a user provided data (-regtest only).\n"},
+            {
+                {"nodeId", RPCArg::Type::NUM, RPCArg::Optional::NO, "Internal peer id of the node the mock data gets added to"},
+                {"proTxHash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The authenticated proTxHash as hex string"},
+                {"publicKey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The authenticated public key as hex string"},
+            },
+            RPCResult{
+                RPCResult::Type::BOOL, "", "If MNAUTH was overridden or not."
+            },
+            RPCExamples{
+                "Override MNAUTH processing\n" +
+                HelpExampleCli("mnauth", "\"nodeId \"proTxHash\" \"publicKey\"\"")
+            },
+        [&](const RPCHelpMan& self, const node::JSONRPCRequest& request) -> UniValue
+{
+    NodeContext& node = EnsureAnyNodeContext(request.context);
+    if(!node.connman)
+        throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
+    if (!Params().MineBlocksOnDemand())
+        throw std::runtime_error("mnauth for regression testing (-regtest mode) only");
+    auto& chainman = EnsureAnyChainman(request.context);
+    int nodeId = request.params[0].getInt<int>();
+    uint256 proTxHash = ParseHashV(request.params[1], "proTxHash");
+    if (proTxHash.IsNull()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "proTxHash invalid");
+    }
+    CBLSPublicKey publicKey;
+    int nHeight = WITH_LOCK(chainman.GetMutex(), return chainman.ActiveHeight());
+    bool bls_legacy_scheme = !llmq::CLLMQUtils::IsV19Active(nHeight);
+    publicKey.SetHexStr(request.params[2].get_str(), bls_legacy_scheme);
+    if (!publicKey.IsValid()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "publicKey invalid");
+    }
+
+    bool fSuccess = node.connman->ForNode(nodeId, AllNodes, [&](CNode* pNode){
+        pNode->SetVerifiedProRegTxHash(proTxHash);
+        pNode->SetVerifiedPubKeyHash(publicKey.GetHash());
+        return true;
+    });
+
+    return fSuccess;
+},
+    };
+}
 static RPCHelpMan validateaddress()
 {
     return RPCHelpMan{
@@ -1588,6 +1755,9 @@ static const CRPCCommand commands[] =
     { "hidden",             &echo,                    },
     { "hidden",             &echojson,                },
     { "hidden",             &echoipc,                 },
+    { "quagba",		    &mnauth		      },
+    { "quagba",             &mnsync		      },
+    { "quagba",		    &spork	              },
 #if defined(USE_SYSCALL_SANDBOX)
     { "hidden",             &invokedisallowedsyscall, },
 #endif // USE_SYSCALL_SANDBOX

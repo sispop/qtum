@@ -37,6 +37,8 @@ CZMQNotificationInterface* CZMQNotificationInterface::Create()
     factories["pubrawblock"] = CZMQAbstractNotifier::Create<CZMQPublishRawBlockNotifier>;
     factories["pubrawtx"] = CZMQAbstractNotifier::Create<CZMQPublishRawTransactionNotifier>;
     factories["pubsequence"] = CZMQAbstractNotifier::Create<CZMQPublishSequenceNotifier>;
+    factories["pubhashgovernancevote"] = CZMQAbstractNotifier::Create<CZMQPublishHashGovernanceVoteNotifier>;
+    factories["pubhashgovernanceobject"] = CZMQAbstractNotifier::Create<CZMQPublishHashGovernanceObjectNotifier>;
 
     std::list<std::unique_ptr<CZMQAbstractNotifier>> notifiers;
     for (const auto& entry : factories)
@@ -185,6 +187,20 @@ void CZMQNotificationInterface::BlockDisconnected(const std::shared_ptr<const CB
     // Next we notify BlockDisconnect listeners for *all* blocks
     TryForEachAndRemoveFailed(notifiers, [pindexDisconnected](CZMQAbstractNotifier* notifier) {
         return notifier->NotifyBlockDisconnect(pindexDisconnected);
+    });
+}
+
+void CZMQNotificationInterface::NotifyGovernanceVote(const uint256 &vote)
+{
+    TryForEachAndRemoveFailed(notifiers, [&vote](CZMQAbstractNotifier* notifier) {
+        return notifier->NotifyGovernanceVote(vote);
+    });
+}
+
+void CZMQNotificationInterface::NotifyGovernanceObject(const uint256 &object)
+{
+    TryForEachAndRemoveFailed(notifiers, [&object](CZMQAbstractNotifier* notifier) {
+        return notifier->NotifyGovernanceObject(object);
     });
 }
 

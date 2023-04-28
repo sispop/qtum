@@ -21,6 +21,12 @@
 #include <util/syscall_sandbox.h>
 #include <util/system.h>
 #include <validation.h>
+#include <evo/deterministicmns.h>
+#include <dsnotificationinterface.h>
+#include <walletinitinterface.h>
+#include <primitives/block.h>
+#include <node/context.h>
+#include <masternode/activemasternode.h>
 
 namespace node {
 std::atomic_bool fImporting(false);
@@ -903,7 +909,7 @@ struct CImportingNow {
     }
 };
 
-void ThreadImport(ChainstateManager& chainman, std::vector<fs::path> vImportFiles, const ArgsManager& args)
+void ThreadImport(ChainstateManager& chainman, std::vector<fs::path> vImportFiles, const ArgsManager& args, CDSNotificationInterface* pdsNotificationInterface, std::unique_ptr<CDeterministicMNManager> &deterministicMNManager, std::unique_ptr<CActiveMasternodeManager> &activeMasternodeManager, const WalletInitInterface &g_wallet_init_interface, node::NodeContext& node)
 {
     SetSyscallSandboxPolicy(SyscallSandboxPolicy::INITIALIZATION_LOAD_BLOCKS);
     ScheduleBatchPriority();
@@ -966,6 +972,27 @@ void ThreadImport(ChainstateManager& chainman, std::vector<fs::path> vImportFile
                 return;
             }
         }
+
+        // quagba
+        if(pdsNotificationInterface)
+            pdsNotificationInterface->InitializeCurrentBlockTip(chainman);
+        // Get all UTXOs for each MN collateral in one go so that we can fill coin cache early
+        // and reduce further locking overhead for cs_main in other parts of code including GUI
+        LogPrintf("Filling coin cache with masternode UTXOs...\n");
+        int64_t nStart = GetTimeMillis();
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        mnList.ForEachMN(false, [&](const auto& dmn) {
+            std::map<COutPoint, Coin> coins;
+            coins[dmn.collateralOutpoint]; 
+            node.chain->findCoins(coins);
+        });
+        LogPrintf("Filling coin cache with masternode UTXOs: done in %dms\n", GetTimeMillis() - nStart);
+
+        if (fMasternodeMode) {
+            assert(activeMasternodeManager);
+            activeMasternodeManager->Init(WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip()));
+        }
+        g_wallet_init_interface.AutoLockMasternodeCollaterals(node);
 
         if (args.GetBoolArg("-stopafterblockimport", DEFAULT_STOPAFTERBLOCKIMPORT)) {
             LogPrintf("Stopping after block import\n");

@@ -51,6 +51,9 @@
 #include <config/bitcoin-config.h>
 #endif
 
+#include <evo/deterministicmns.h>
+#include <masternode/masternodesync.h>
+
 #include <any>
 #include <memory>
 #include <optional>
@@ -73,8 +76,40 @@ using interfaces::MakeHandler;
 using interfaces::Node;
 using interfaces::WalletLoader;
 
+using interfaces::EVO;
+namespace Masternode {
+using interfaces::Masternode::Sync;
+}
+
 namespace node {
 namespace {
+class EVOImpl : public EVO
+{
+public:
+    CDeterministicMNList getListAtChainTip() override
+    {
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        return mnList;
+    }
+};
+
+class MasternodeSyncImpl : public Masternode::Sync
+{
+public:
+    bool isSynced() override
+    {
+        return masternodeSync.IsSynced();
+    }
+    bool isBlockchainSynced() override
+    {
+        return masternodeSync.IsBlockchainSynced();
+    }
+    std::string getSyncStatus() override
+    {
+        return masternodeSync.GetSyncStatus().original;
+    }
+};
+
 #ifdef ENABLE_EXTERNAL_SIGNER
 class ExternalSignerImpl : public interfaces::ExternalSigner
 {
@@ -88,9 +123,21 @@ private:
 
 class NodeImpl : public Node
 {
+    EVOImpl m_evo;
+    MasternodeSyncImpl m_masternodeSync;
 private:
     ChainstateManager& chainman() { return *Assert(m_context->chainman); }
 public:
+    EVO& evo() override { return m_evo; }
+    Masternode::Sync& masternodeSync() override { return m_masternodeSync; }
+    std::unique_ptr<Handler> handleNotifyAdditionalDataSyncProgressChanged(NotifyAdditionalDataSyncProgressChangedFn fn) override
+    {
+        return MakeSignalHandler(::uiInterface.NotifyAdditionalDataSyncProgressChanged_connect(fn));
+    }
+    std::unique_ptr<Handler> handleNotifyMasternodeListChanged(NotifyMasternodeListChangedFn fn) override
+    {
+        return MakeSignalHandler(::uiInterface.NotifyMasternodeListChanged_connect(fn));
+    }
     explicit NodeImpl(NodeContext& context) { setContext(&context); }
     void initLogging() override { InitLogging(*Assert(m_context->args)); }
     void initParameterInteraction() override { InitParameterInteraction(*Assert(m_context->args)); }
@@ -579,6 +626,10 @@ public:
         }
         return std::nullopt;
     }
+    CDeterministicMNList getMNList(int height) override {
+        return deterministicMNManager->GetListForBlock(WITH_LOCK(chainman().GetMutex(), return chainman().ActiveChain()[height]));
+    }
+
     bool findBlock(const uint256& hash, const FoundBlock& block) override
     {
         WAIT_LOCK(cs_main, lock);

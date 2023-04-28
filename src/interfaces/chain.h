@@ -142,6 +142,8 @@ public:
     //! or one of its ancestors.
     virtual std::optional<int> findLocatorFork(const CBlockLocator& locator) = 0;
 
+    //! Get masternode list for a specific block height.
+    virtual CDeterministicMNList getMNList(int height) = 0;
     //! Return whether node has the block and optionally return block metadata
     //! or contents.
     virtual bool findBlock(const uint256& hash, const FoundBlock& block={}) = 0;

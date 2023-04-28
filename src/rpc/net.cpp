@@ -108,6 +108,13 @@ static RPCHelpMan getpeerinfo()
                     {RPCResult::Type::STR, "network", "Network (" + Join(GetNetworkNames(/* append_unroutable */ true), ", ") + ")"},
                     {RPCResult::Type::NUM, "mapped_as", /*optional=*/true, "The AS in the BGP route to the peer used for diversifying\n"
                                                         "peer selection (only available if the asmap config flag is set)"},
+                    // Quagba
+                    {RPCResult::Type::STR_HEX, "verified_proregtx_hash",  /*optional=*/true, "Only present when the peer is a masternode and successfully\n"
+                                                                                "authenticated via MNAUTH. In this case, this field contains the\n"
+                                                                                "protx hash of the masternode"},
+                    {RPCResult::Type::STR_HEX, "verified_pubkey_hash",  /*optional=*/true, "Only present when the peer is a masternode and successfully\n"
+                                                                                "authenticated via MNAUTH. In this case, this field contains the\n"
+                                                                                "hash of the masternode's operator public key"},
                     {RPCResult::Type::STR_HEX, "services", "The services offered"},
                     {RPCResult::Type::ARR, "servicesnames", "the services offered, in human-readable form",
                     {
@@ -137,6 +144,7 @@ static RPCHelpMan getpeerinfo()
                     {
                         {RPCResult::Type::NUM, "n", "The heights of blocks we're currently asking from this peer"},
                     }},
+                    {RPCResult::Type::BOOL, "masternode", "Whether connection was due to masternode connection attempt"},
                     {RPCResult::Type::BOOL, "addr_relay_enabled", /*optional=*/true, "Whether we participate in address relay with this peer"},
                     {RPCResult::Type::NUM, "addr_processed", /*optional=*/true, "The total number of addresses processed, excluding those dropped due to rate limiting"},
                     {RPCResult::Type::NUM, "addr_rate_limited", /*optional=*/true, "The total number of addresses dropped due to rate limiting"},
@@ -223,6 +231,7 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("inbound", stats.fInbound);
         obj.pushKV("bip152_hb_to", stats.m_bip152_highbandwidth_to);
         obj.pushKV("bip152_hb_from", stats.m_bip152_highbandwidth_from);
+        obj.pushKV("masternode", stats.m_masternode_connection);
         if (fStateStats) {
             obj.pushKV("startingheight", statestats.m_starting_height);
             obj.pushKV("synced_headers", statestats.nSyncHeight);

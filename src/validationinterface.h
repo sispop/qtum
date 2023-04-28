@@ -174,6 +174,11 @@ protected:
      * has been received and connected to the headers tree, though not validated yet */
     virtual void NewPoWValidBlock(const CBlockIndex *pindex, const std::shared_ptr<const CBlock>& block) {};
     friend class CMainSignals;
+    virtual void NotifyHeaderTip(const CBlockIndex *pindexNew) {}
+    virtual void SynchronousUpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork) {}
+    virtual void NotifyGovernanceVote(const uint256& vote) {}
+    virtual void NotifyGovernanceObject(const uint256 &object) {}
+    virtual void NotifyMasternodeListChanged(bool undo, const CDeterministicMNList& oldMNList, const CDeterministicMNListDiff& diff) {}
 };
 
 struct MainSignalsInstance;
@@ -205,6 +210,9 @@ public:
     void ChainStateFlushed(const CBlockLocator &);
     void BlockChecked(const CBlock&, const BlockValidationState&);
     void NewPoWValidBlock(const CBlockIndex *, const std::shared_ptr<const CBlock>&);
+    void NotifyGovernanceVote(const uint256& vote);
+    void NotifyGovernanceObject(const uint256& object);
+    void NotifyMasternodeListChanged(bool undo, const CDeterministicMNList& oldMNList, const CDeterministicMNListDiff& diff);
 };
 
 CMainSignals& GetMainSignals();

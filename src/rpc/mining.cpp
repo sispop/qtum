@@ -38,7 +38,9 @@
 #include <validation.h>
 #include <validationinterface.h>
 #include <warnings.h>
-
+#include <governance/governanceclasses.h>
+#include <masternode/masternodepayments.h>
+#include <masternode/masternodesync.h>
 #include <util/time.h>
 #include <memory>
 #include <stdint.h>
@@ -594,6 +596,28 @@ static RPCHelpMan getblocktemplate()
                 {RPCResult::Type::NUM, "height", "The height of the next block"},
                 {RPCResult::Type::STR_HEX, "signet_challenge", /*optional=*/true, "Only on signet"},
                 {RPCResult::Type::STR_HEX, "default_witness_commitment", /*optional=*/true, "a valid witness commitment for the unmodified block template"},
+                // Quagba
+                {RPCResult::Type::NUM, "version_coinbase", "The coinbase tx version"},
+                {RPCResult::Type::ARR, "masternode", "",
+                {
+                    {RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::STR, "payee", "Payee address"},
+                        {RPCResult::Type::STR_HEX, "script", "Payee script"},
+                        {RPCResult::Type::NUM, "amount", "Payee amount"},
+                    }},
+                }},
+                {RPCResult::Type::NUM, "masternode_collateral_height", "Collateral block height of payee"},
+                {RPCResult::Type::ARR, "superblock", "",
+                {
+                    {RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::STR, "payee", "Superblock address"},
+                        {RPCResult::Type::STR_HEX, "script", "Superblock script"},
+                        {RPCResult::Type::NUM, "amount", "Superblock amount"},
+                    }},
+                }}, 
+                {RPCResult::Type::STR_HEX, "default_witness_commitment_extra",  /*optional=*/true, "a valid extra witness commitment for the unmodified block template"},
             }},
         },
         RPCExamples{
@@ -683,6 +707,20 @@ static RPCHelpMan getblocktemplate()
             throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME " is in initial sync and waiting for blocks...");
         }
     }
+
+    // Quagba
+    // Get expected MN/superblock payees. The call to GetBlockTxOuts might fail on regtest/devnet or when
+    // testnet is reset. This is fine and we ignore failure (blocks will be accepted)
+    std::vector<CTxOut> voutMasternodePayments;
+    CAmount mnRet, mnRet1;
+    int nCollateralHeight;
+    mnpayments.GetBlockTxOuts(node.chainman->ActiveChain(), node.chainman->ActiveHeight() + 1, 0, voutMasternodePayments, 0, mnRet, mnRet1, nCollateralHeight);
+
+    // next bock is a superblock and we need governance info to correctly construct it
+    if (!fRegTest && !fSigNet && isSBSportActive
+        && !masternodeSync.IsSynced()
+        && CSuperblock::IsValidBlockHeight(node.chainman->ActiveHeight() + 1))
+            throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME " is syncing with network...");
 
     static unsigned int nTransactionsUpdatedLast;
     const CTxMemPool& mempool = EnsureMemPool(node);
@@ -929,6 +967,39 @@ static RPCHelpMan getblocktemplate()
         result.pushKV("default_witness_commitment", HexStr(pblocktemplate->vchCoinbaseCommitment));
     }
 
+    // Quagba
+    result.pushKV("version_coinbase", pblock->vtx[0]->nVersion);
+    UniValue masternodeObj(UniValue::VARR);
+    for (const auto& txout : pblocktemplate->voutMasternodePayments) {
+        CTxDestination address1;
+        ExtractDestination(txout.scriptPubKey, address1);
+
+        UniValue obj(UniValue::VOBJ);
+        obj.pushKV("payee", EncodeDestination(address1));
+        obj.pushKV("script", HexStr(txout.scriptPubKey));
+        obj.pushKV("amount", txout.nValue);
+        masternodeObj.push_back(obj);
+    }
+    
+
+    result.pushKV("masternode", masternodeObj);
+    result.pushKV("masternode_collateral_height", nCollateralHeight);
+
+    UniValue superblockObjArray(UniValue::VARR);
+    for (const auto& txout : pblocktemplate->voutSuperblockPayments) {
+        UniValue entry(UniValue::VOBJ);
+        CTxDestination address1;
+        ExtractDestination(txout.scriptPubKey, address1);
+        entry.pushKV("payee", EncodeDestination(address1));
+        entry.pushKV("script", HexStr(txout.scriptPubKey));
+        entry.pushKV("amount", txout.nValue);
+        superblockObjArray.push_back(entry);
+    }
+    
+    result.pushKV("superblock", superblockObjArray);
+    if (!pblocktemplate->vchCoinbaseCommitmentExtra.empty()) {
+        result.pushKV("default_witness_commitment_extra", HexStr(pblocktemplate->vchCoinbaseCommitmentExtra));
+    }
     return result;
 },
     };

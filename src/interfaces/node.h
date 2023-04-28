@@ -28,6 +28,7 @@ class Coin;
 class RPCTimerInterface;
 class UniValue;
 class Proxy;
+class CDeterministicMNList;
 enum class SynchronizationState;
 enum class TransactionError;
 struct CNodeStateStats;
@@ -53,6 +54,27 @@ struct BlockAndHeaderTipInfo
     int64_t header_time;
     double verification_progress;
 };
+
+class EVO
+{
+public:
+    virtual ~EVO() {}
+    virtual CDeterministicMNList getListAtChainTip() = 0;
+};
+
+
+//! Interface for the src/masternode part of a syscoin node (syscoind process).
+namespace Masternode
+{
+class Sync
+{
+public:
+    virtual ~Sync() {}
+    virtual bool isBlockchainSynced() = 0;
+    virtual bool isSynced() = 0;
+    virtual std::string getSyncStatus() =  0;
+};
+}
 
 //! External signer interface used by the GUI.
 class ExternalSigner
@@ -206,6 +228,12 @@ public:
     //! Broadcast transaction.
     virtual TransactionError broadcastTransaction(CTransactionRef tx, CAmount max_tx_fee, std::string& err_string) = 0;
 
+    //! Return interface for accessing evo related handler.
+    virtual EVO& evo() = 0;
+
+    //! Return interface for accessing masternode related handler.
+    virtual Masternode::Sync& masternodeSync() = 0;
+
     //! Get wallet loader.
     virtual WalletLoader& walletLoader() = 0;
 
@@ -273,6 +301,12 @@ public:
     using NotifyHeaderTipFn =
         std::function<void(SynchronizationState, interfaces::BlockTip tip, double verification_progress)>;
     virtual std::unique_ptr<Handler> handleNotifyHeaderTip(NotifyHeaderTipFn fn) = 0;
+
+    //! Register handler for additional sync messages.
+    using NotifyAdditionalDataSyncProgressChangedFn = std::function<void(double nSyncProgress)>;
+    virtual std::unique_ptr<Handler> handleNotifyAdditionalDataSyncProgressChanged(NotifyAdditionalDataSyncProgressChangedFn fn) = 0;  
+    using NotifyMasternodeListChangedFn = std::function<void(const CDeterministicMNList& mnList)>;
+    virtual std::unique_ptr<Handler> handleNotifyMasternodeListChanged(NotifyMasternodeListChangedFn fn) = 0;
 
     //! Get and set internal node context. Useful for testing, but not
     //! accessible across processes.

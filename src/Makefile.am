@@ -123,6 +123,33 @@ endif
 # bitcoin core #
 BITCOIN_CORE_H = \
   addrdb.h \
+  spork.h \
+  dsnotificationinterface.h \
+  governance/governance.h \
+  governance/governanceclasses.h \
+  governance/governanceexceptions.h \
+  governance/governanceobject.h \
+  governance/governancevalidators.h \
+  governance/governancevote.h \
+  governance/governancevotedb.h \
+  cxxtimer.hpp \
+  evo/cbtx.h \
+  evo/deterministicmns.h \
+  evo/evodb.h \
+  evo/mnauth.h \
+  evo/providertx.h \
+  evo/simplifiedmns.h \
+  evo/specialtx.h \
+  masternode/activemasternode.h \
+  masternode/masternodemeta.h \
+  masternode/masternodepayments.h \
+  masternode/masternodesync.h \
+  masternode/masternodeutils.h \
+  flatdatabase.h \
+  messagesigner.h \
+  netfulfilledman.h \
+  cachemap.h \
+  cachemultimap.h \
   addrman.h \
   addrman_impl.h \
   attributes.h \
@@ -178,6 +205,18 @@ BITCOIN_CORE_H = \
   interfaces/wallet.h \
   key.h \
   key_io.h \
+  llmq/quorums.h \
+  llmq/quorums_blockprocessor.h \
+  llmq/quorums_commitment.h \
+  llmq/quorums_chainlocks.h \
+  llmq/quorums_debug.h \
+  llmq/quorums_dkgsessionhandler.h \
+  llmq/quorums_dkgsessionmgr.h \
+  llmq/quorums_dkgsession.h \
+  llmq/quorums_init.h \
+  llmq/quorums_signing.h \
+  llmq/quorums_signing_shares.h \
+  llmq/quorums_utils.h \
   logging.h \
   logging/timer.h \
   mapport.h \
@@ -356,6 +395,39 @@ ipc/capnp/libbitcoin_ipc_a-ipc.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
 libbitcoin_node_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(NATPMP_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
 libbitcoin_node_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_node_a_SOURCES = \
+  dsnotificationinterface.cpp \
+  governance/governance.cpp \
+  governance/governanceclasses.cpp \
+  governance/governanceobject.cpp \
+  governance/governancevalidators.cpp \
+  governance/governancevote.cpp \
+  governance/governancevotedb.cpp \
+  evo/cbtx.cpp \
+  evo/deterministicmns.cpp \
+  evo/evodb.cpp \
+  evo/mnauth.cpp \
+  evo/providertx.cpp \
+  evo/simplifiedmns.cpp \
+  evo/specialtx.cpp \
+  llmq/quorums.cpp \
+  llmq/quorums_blockprocessor.cpp \
+  llmq/quorums_commitment.cpp \
+  llmq/quorums_chainlocks.cpp \
+  llmq/quorums_debug.cpp \
+  llmq/quorums_dkgsessionhandler.cpp \
+  llmq/quorums_dkgsessionmgr.cpp \
+  llmq/quorums_dkgsession.cpp \
+  llmq/quorums_init.cpp \
+  llmq/quorums_signing.cpp \
+  llmq/quorums_signing_shares.cpp \
+  llmq/quorums_utils.cpp \
+  masternode/activemasternode.cpp \
+  masternode/masternodemeta.cpp \
+  masternode/masternodepayments.cpp \
+  masternode/masternodesync.cpp \
+  masternode/masternodeutils.cpp \
+  messagesigner.cpp \
+  spork.cpp \
   addrdb.cpp \
   addrman.cpp \
   banman.cpp \
@@ -402,6 +474,10 @@ libbitcoin_node_a_SOURCES = \
   rpc/net.cpp \
   rpc/rawtransaction.cpp \
   rpc/server.cpp \
+  rpc/masternode.cpp \
+  rpc/governance.cpp \
+  rpc/rpcevo.cpp \
+  rpc/rpcquorums.cpp \
   rpc/server_util.cpp \
   script/sigcache.cpp \
   shutdown.cpp \
@@ -423,6 +499,9 @@ libbitcoin_node_a_SOURCES = \
 if ENABLE_WALLET
 libbitcoin_node_a_SOURCES += wallet/init.cpp \
   wallet/stake.cpp \
+  wallet/rpcevo.cpp \
+  wallet/rpcgovernance.cpp \
+  wallet/rpcmasternode.cpp \
   wallet/rpc/contract.cpp \
   wallet/rpc/mining.cpp
 endif

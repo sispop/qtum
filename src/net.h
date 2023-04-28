@@ -284,6 +284,10 @@ public:
     Network m_network;
     uint32_t m_mapped_as;
     ConnectionType m_conn_type;
+    uint256 verifiedProRegTxHash;
+    // In case this is a verified MN, this value is the hashed operator pubkey of the MN
+    uint256 verifiedPubKeyHash;
+    bool m_masternode_connection;
 };
 
 
@@ -447,6 +451,15 @@ public:
     //! Unix epoch time at peer connection
     const std::chrono::seconds m_connected;
     std::atomic<int64_t> nTimeOffset{0};
+    // SYSCOIN
+    std::atomic<int64_t> nTimeFirstMessageReceived;
+    std::atomic<bool> fFirstMessageIsMNAUTH;
+    // If 'true' this node will be disconnected on CMasternodeMan::ProcessMasternodeConnections()
+    std::atomic<bool> m_masternode_connection;
+    // If 'true' this node will be disconnected after MNAUTH
+    std::atomic<bool> m_masternode_probe_connection;
+    // If 'true', we identified it as an intra-quorum relay connection
+    std::atomic<bool> m_masternode_iqr_connection{false};
     // Address of this peer
     const CAddress addr;
     // Bind address of our side of the connection
@@ -597,6 +610,13 @@ public:
 
     /** Lowest measured round-trip time. Used as an inbound peer eviction
      * criterium in CConnman::AttemptToEvictConnection. */
+    // Challenge sent in VERSION to be answered with MNAUTH (only happens between MNs)
+    mutable RecursiveMutex cs_mnauth;
+    uint256 sentMNAuthChallenge GUARDED_BY(cs_mnauth);
+    uint256 receivedMNAuthChallenge GUARDED_BY(cs_mnauth);
+    uint256 verifiedProRegTxHash GUARDED_BY(cs_mnauth);
+    uint256 verifiedPubKeyHash GUARDED_BY(cs_mnauth);
+
     std::atomic<std::chrono::microseconds> m_min_ping_time{std::chrono::microseconds::max()};
 
     CNode(NodeId id, ServiceFlags nLocalServicesIn, std::shared_ptr<Sock> sock, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, ConnectionType conn_type_in, bool inbound_onion);
@@ -679,6 +699,50 @@ public:
         return nLocalServices;
     }
 
+    std::string ConnectionTypeAsString() const { return ::ConnectionTypeAsString(m_conn_type); }
+
+    // Quagba
+    bool CanRelay() const { LOCK(cs_mnauth); return !m_masternode_connection || m_masternode_iqr_connection; }
+    uint256 GetSentMNAuthChallenge() const {
+        LOCK(cs_mnauth);
+        return sentMNAuthChallenge;
+    }
+
+    uint256 GetReceivedMNAuthChallenge() const {
+        LOCK(cs_mnauth);
+        return receivedMNAuthChallenge;
+    }
+
+    uint256 GetVerifiedProRegTxHash() const {
+        LOCK(cs_mnauth);
+        return verifiedProRegTxHash;
+    }
+
+    uint256 GetVerifiedPubKeyHash() const {
+        LOCK(cs_mnauth);
+        return verifiedPubKeyHash;
+    }
+
+    void SetSentMNAuthChallenge(const uint256& newSentMNAuthChallenge) {
+        LOCK(cs_mnauth);
+        sentMNAuthChallenge = newSentMNAuthChallenge;
+    }
+
+    void SetReceivedMNAuthChallenge(const uint256& newReceivedMNAuthChallenge) {
+        LOCK(cs_mnauth);
+        receivedMNAuthChallenge = newReceivedMNAuthChallenge;
+    }
+
+    void SetVerifiedProRegTxHash(const uint256& newVerifiedProRegTxHash) {
+        LOCK(cs_mnauth);
+        verifiedProRegTxHash = newVerifiedProRegTxHash;
+    }
+
+    void SetVerifiedPubKeyHash(const uint256& newVerifiedPubKeyHash) {
+        LOCK(cs_mnauth);
+        verifiedPubKeyHash = newVerifiedPubKeyHash;
+    }
+    bool IsMasternodeConnection() const { LOCK(cs_mnauth); return m_masternode_connection; }
     std::string ConnectionTypeAsString() const { return ::ConnectionTypeAsString(m_conn_type); }
 
     /** A ping-pong round trip has completed successfully. Update latest and minimum ping times. */
@@ -834,6 +898,16 @@ public:
     bool GetNetworkActive() const { return fNetworkActive; };
     bool GetUseAddrmanOutgoing() const { return m_use_addrman_outgoing; };
     void SetNetworkActive(bool active);
+    enum class MasternodeConn {
+        Is_Not_Connection,
+        Is_Connection,
+    };
+
+    enum class MasternodeProbeConn {
+        Is_Not_Connection,
+        Is_Connection,
+    };
+    void OpenMasternodeConnection(const CAddress& addrConnect, MasternodeProbeConn probe = MasternodeProbeConn::Is_Connection) EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
     void OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant* grantOutbound, const char* strDest, ConnectionType conn_type);
     bool CheckIncomingNonce(uint64_t nonce);
 
@@ -859,6 +933,9 @@ public:
                 func(node);
         }
     };
+
+    void CopyNodeVector(std::vector<CNode*>& vecNodesCopy);
+    void ReleaseNodeVector(const std::vector<CNode*>& vecNodes);
 
     // Addrman functions
     /**
@@ -900,6 +977,20 @@ public:
     bool AddNode(const std::string& node);
     bool RemoveAddedNode(const std::string& node);
     std::vector<AddedNodeInfo> GetAddedNodeInfo() const;
+
+    // Quagba
+    bool AddPendingMasternode(const uint256& proTxHash);
+    void SetMasternodeQuorumRelayMembers(uint8_t llmqType, const uint256& quorumHash, const std::set<uint256>& proTxHashes);
+    void SetMasternodeQuorumNodes(uint8_t llmqType, const uint256& quorumHash, const std::set<uint256>& proTxHashes);
+    bool HasMasternodeQuorumNodes(uint8_t llmqType, const uint256& quorumHash);
+    std::set<uint256> GetMasternodeQuorums(uint8_t llmqType);
+    // also returns QWATCH nodes
+    void GetMasternodeQuorumNodes(uint8_t llmqType, const uint256& quorumHash, std::set<NodeId> &result) const;
+    void RemoveMasternodeQuorumNodes(uint8_t llmqType, const uint256& quorumHash);
+    bool IsMasternodeQuorumNode(const CNode* pnode);
+    bool IsMasternodeQuorumRelayMember(const uint256& protxHash);
+    void AddPendingProbeConnections(const std::set<uint256>& proTxHashes);
+    size_t GetMaxOutboundNodeCount();
 
     /**
      * Attempts to open a connection. Currently only used from tests.
@@ -953,7 +1044,8 @@ public:
     CSipHasher GetDeterministicRandomizer(uint64_t id) const;
 
     unsigned int GetReceiveFloodSize() const;
-
+    // Quagba
+    bool IsMasternodeOrDisconnectRequested(const CService& addr);
     void WakeMessageHandler();
 
     /** Return true if we should disconnect the peer for failing an inactivity check. */
@@ -1055,6 +1147,7 @@ private:
 
     void ThreadSocketHandler();
     void ThreadDNSAddressSeed();
+    void ThreadOpenMasternodeConnections() EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
 
     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
 
@@ -1067,7 +1160,7 @@ private:
      * Determine whether we're already connected to a given address, in order to
      * avoid initiating duplicate connections.
      */
-    bool AlreadyConnectedToAddress(const CAddress& addr);
+    bool AlreadyConnectedToAddress(const CAddress& addr, bool masternode_probe_connection = false);
 
     bool AttemptToEvictConnection();
     CNode* ConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, ConnectionType conn_type);
@@ -1120,6 +1213,11 @@ private:
     Mutex m_addr_fetches_mutex;
     std::vector<std::string> m_added_nodes GUARDED_BY(m_added_nodes_mutex);
     mutable Mutex m_added_nodes_mutex;
+    std::vector<uint256> vPendingMasternodes GUARDED_BY(cs_vPendingMasternodes);
+    std::map<std::pair<uint8_t, uint256>, std::set<uint256>> masternodeQuorumNodes GUARDED_BY(cs_vPendingMasternodes);
+    std::map<std::pair<uint8_t, uint256>, std::set<uint256>> masternodeQuorumRelayMembers GUARDED_BY(cs_vPendingMasternodes);
+    std::set<uint256> masternodePendingProbes;
+    mutable RecursiveMutex cs_vPendingMasternodes;
     std::vector<CNode*> m_nodes GUARDED_BY(m_nodes_mutex);
     std::list<CNode*> m_nodes_disconnected;
     mutable RecursiveMutex m_nodes_mutex;
@@ -1223,6 +1321,7 @@ private:
     std::thread threadOpenConnections;
     std::thread threadMessageHandler;
     std::thread threadI2PAcceptIncoming;
+    std::thread threadOpenMasternodeConnections;
 
     /** flag for deciding to connect to an extra outbound peer,
      *  in excess of m_max_outbound_full_relay

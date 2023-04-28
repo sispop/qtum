@@ -49,6 +49,11 @@ struct CNodeStateStats {
     bool m_addr_relay_enabled{false};
 };
 
+struct peer {
+
+    std::atomic<bool> m_masternode_connection{false};
+};
+
 class PeerManager : public CValidationInterface, public NetEventsInterface
 {
 public:
@@ -107,5 +112,13 @@ public:
 
 /** Default for -headerspamfiltermaxsize, maximum size of the list of indexes in the header spam filter */
 unsigned int GefaultHeaderSpamFilterMaxSize();
+
+// Quagba
+// Upstream moved this into net_processing.cpp (13417), however since we use Misbehaving in a number of quagba specific
+// files such as mnauth.cpp and governance.cpp it makes sense to keep it in the header
+/** Increase a node's misbehavior score. */
+bool IsBanned(NodeId nodeid, BanMan& banman);
+unsigned int GetMaxInv();
+bool CanServeBlocks(const Peer& peer);
 
 #endif // BITCOIN_NET_PROCESSING_H

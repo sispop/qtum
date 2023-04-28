@@ -137,6 +137,15 @@ public:
     bool HasHardwareWalletSupport() const { return fHasHardwareWalletSupport; }
     void UpdateLondonHeight(int nHeight);
     void UpdateTaprootHeight(int nHeight);
+    int FulfilledRequestExpireTime() const { return nFulfilledRequestExpireTime; }
+    const std::vector<std::string>& SporkAddresses() const { return vSporkAddresses; }
+    int MinSporkKeys() const { return nMinSporkKeys; }
+    void UpdateLLMQTestParams(int size, int threshold);
+    /** Require addresses specified with "-externalip" parameter to be routable */
+    bool RequireRoutableExternalIP() const { return fRequireRoutableExternalIP; }
+    /** How long to wait until we allow retrying of a LLMQ connection  */
+    int LLMQConnectionRetryTimeout() const { return nLLMQConnectionRetryTimeout; }
+    void UpdateDIP3Parameters(int nActivationHeight, int nEnforcementHeight);
     //! Get allowed assumeutxo configuration.
     //! @see ChainstateManager
     const MapAssumeutxo& Assumeutxo() const { return m_assumeutxo_data; }
@@ -167,6 +176,11 @@ protected:
     MapAssumeutxo m_assumeutxo_data;
     ChainTxData chainTxData;
     bool fHasHardwareWalletSupport;
+    int nLLMQConnectionRetryTimeout;
+    bool fRequireRoutableExternalIP;
+    int nFulfilledRequestExpireTime;
+    std::vector<std::string> vSporkAddresses;
+    int nMinSporkKeys;
 };
 
 /**
@@ -258,5 +272,10 @@ void UpdateLondonHeight(int nHeight);
  * Allows modifying the taproot block height regtest parameter.
  */
 void UpdateTaprootHeight(int nHeight);
+
+/**
+ * Allows modifying parameters of the test LLMQ
+ */
+void UpdateLLMQTestParams(int size, int threshold);
 
 #endif // BITCOIN_CHAINPARAMS_H

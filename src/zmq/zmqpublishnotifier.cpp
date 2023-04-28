@@ -33,6 +33,10 @@ static const char *MSG_RAWBLOCK  = "rawblock";
 static const char *MSG_RAWTX     = "rawtx";
 static const char *MSG_SEQUENCE  = "sequence";
 
+static const char *MSG_RAWMEMPOOLTX  = "rawmempooltx";
+static const char *MSG_HASHGVOTE     = "hashgovernancevote";
+static const char *MSG_HASHGOBJ      = "hashgovernanceobject";
+static const char *MSG_SEQUENCE  = "sequence";
 // Internal function to send multipart message
 static int zmq_send_multipart(void *sock, const void* data, size_t size, ...)
 {
@@ -255,6 +259,24 @@ bool CZMQPublishRawTransactionNotifier::NotifyTransaction(const CTransaction &tr
     CDataStream ss(SER_NETWORK, PROTOCOL_VERSION | RPCSerializationFlags());
     ss << transaction;
     return SendZmqMessage(MSG_RAWTX, &(*ss.begin()), ss.size());
+}
+
+bool CZMQPublishHashGovernanceVoteNotifier::NotifyGovernanceVote(const uint256& hash)
+{
+    LogPrint(BCLog::ZMQ, "zmq: Publish hashgovernancevote %s\n", hash.GetHex());
+    uint8_t data[32];
+    for (unsigned int i = 0; i < 32; i++)
+        data[31 - i] = hash.begin()[i];
+    return SendZmqMessage(MSG_HASHGVOTE, data, 32);
+}
+
+bool CZMQPublishHashGovernanceObjectNotifier::NotifyGovernanceObject(const uint256& hash)
+{
+    LogPrint(BCLog::ZMQ, "zmq: Publish hashgovernanceobject %s\n", hash.GetHex());
+    uint8_t data[32];
+    for (unsigned int i = 0; i < 32; i++)
+        data[31 - i] = hash.begin()[i];
+    return SendZmqMessage(MSG_HASHGOBJ, data, 32);
 }
 
 // Helper function to send a 'sequence' topic message with the following structure:

@@ -22,6 +22,13 @@
  */
 static const int SERIALIZE_TRANSACTION_NO_WITNESS = 0x40000000;
 
+const int QUAGBA_TX_VERSION_MN_REGISTER = 80;
+const int QUAGBA_TX_VERSION_MN_UPDATE_SERVICE = 81;
+const int QUAGBA_TX_VERSION_MN_UPDATE_REGISTRAR = 82;
+const int QUAGBA_TX_VERSION_MN_UPDATE_REVOKE = 83;
+const int QUAGBA_TX_VERSION_MN_COINBASE = 84;
+const int QUAGBA_TX_VERSION_MN_QUORUM_COMMITMENT = 85;
+
 /** An outpoint - a combination of a transaction hash and an index n into its vout */
 class COutPoint
 {
@@ -365,6 +372,8 @@ public:
         return (HasOpCall() ? OpCode::OpCall : 0) + (HasOpCreate() ? OpCode::OpCreate : 0);
     }
     bool HasOpSender() const;
+
+    bool IsMasternodeTx(const int &nVersion);
 
     bool IsCoinBase() const
     {

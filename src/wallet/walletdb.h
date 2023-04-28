@@ -19,7 +19,7 @@ class CScript;
 class uint160;
 class uint256;
 struct CBlockLocator;
-
+class CGovernanceObject;
 namespace wallet {
 class CKeyPool;
 class CMasterKey;
@@ -309,6 +309,8 @@ public:
     bool TxnCommit();
     //! Abort current transaction
     bool TxnAbort();
+    //! Write a CGovernanceObject to the database
+    bool WriteGovernanceObject(const CGovernanceObject& obj);
 private:
     std::unique_ptr<DatabaseBatch> m_batch;
     WalletDatabase& m_database;

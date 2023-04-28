@@ -29,7 +29,7 @@
 #include <consensus/params.h>
 #include <pos.h>
 #include <qtum/qtumdelegation.h>
-
+#include <governance/governanceobject.h>
 #include <algorithm>
 #include <atomic>
 #include <map>
@@ -400,7 +400,8 @@ public:
     typedef std::map<unsigned int, CMasterKey> MasterKeyMap;
     MasterKeyMap mapMasterKeys;
     unsigned int nMasterKeyMaxID = 0;
-
+    // Quagba Map from governance object hash to governance object, they are added by gobject_prepare.
+    std::map<uint256, CGovernanceObject> m_gobjects;
     /** Construct wallet with specified name and database implementation. */
     CWallet(interfaces::Chain* chain, const std::string& name, const ArgsManager& args, std::unique_ptr<WalletDatabase> database)
         : m_args(args),
@@ -769,6 +770,7 @@ public:
     bool IsFromMe(const CTransaction& tx) const;
     CAmount GetDebit(const CTransaction& tx, const isminefilter& filter) const;
     void chainStateFlushed(const CBlockLocator& loc) override;
+    void AutoLockMasternodeCollaterals();
 
     DBErrors LoadWallet();
     DBErrors ZapSelectTx(std::vector<uint256>& vHashIn, std::vector<uint256>& vHashOut) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -901,6 +903,12 @@ public:
 
     /* Returns true if the wallet can give out new addresses. This means it has keys in the keypool or can generate new keys */
     bool CanGetAddresses(bool internal = false) const;
+    /** Load a CGovernanceObject into m_gobjects. */
+    bool LoadGovernanceObject(const CGovernanceObject& obj) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    /** Store a CGovernanceObject in the wallet database. This should only be used by governance objects that are created by this wallet via `gobject prepare`. */
+    bool WriteGovernanceObject(const CGovernanceObject& obj) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    /** Returns a vector containing pointers to the governance objects in m_gobjects */
+    std::vector<const CGovernanceObject*> GetGovernanceObjects() EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     /**
      * Blocks until the wallet state is up-to-date to /at least/ the current
